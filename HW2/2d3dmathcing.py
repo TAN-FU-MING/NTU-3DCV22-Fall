@@ -2,7 +2,6 @@ from scipy.spatial.transform import Rotation as R
 import pandas as pd
 import numpy as np
 import cv2
-import time
 
 images_df = pd.read_pickle("data/images.pkl")
 train_df = pd.read_pickle("data/train.pkl")
@@ -44,14 +43,17 @@ def pnpsolver(query,model,cameraMatrix=0,distortion=0):
     cameraMatrix = np.array([[1868.27,0,540],[0,1869.18,960],[0,0,1]])    
     distCoeffs = np.array([0.0847023,-0.192929,-0.000201144,-0.000725352])
 
-    return cv2.solvePnPRansac(points3D, points2D, cameraMatrix, distCoeffs)
+    points3D, points2D, cameraMatrix, distCoeffs
+
+
+    return retval, rvec, tvec, inliers
 
 # Process model descriptors
 desc_df = average_desc(train_df, points3D_df)
 kp_model = np.array(desc_df["XYZ"].to_list())
 desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
 
-# Load quaery image
+# Load query image
 idx = 200
 fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
 rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
