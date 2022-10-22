@@ -54,7 +54,7 @@ def pnpsolver(query,model,cameraMatrix=0,distortion=0):
 
 def Ransac(points3D, points2D, cameraMatrix, distCoeffs):
     N = 20
-    threshold = 5
+    threshold = 15
     k = 6
 
     num_best_inliners = 0
