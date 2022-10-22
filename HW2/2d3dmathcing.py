@@ -202,15 +202,13 @@ desc_df = average_desc(train_df, points3D_df)
 kp_model = np.array(desc_df["XYZ"].to_list())
 desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
 
-rimg_list = []
 R_list, T_list = [], []
 R_diff_list, T_diff_list = [], []
 
 for idx in trange(1, point_desc_df['IMAGE_ID'].max()):
     # Load query image
-    fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
-    rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
-    rimg_list.append(rimg)
+    # fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
+    # rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
 
     # Load query keypoints and descriptors
     points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
