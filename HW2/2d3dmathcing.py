@@ -3,9 +3,11 @@ from scipy.spatial.transform import Rotation as R
 import pandas as pd
 import numpy as np
 from numpy.polynomial.polynomial import polycompanion
-from numpy.linalg import eig, norm
+from numpy.linalg import eig, norm, svd, inv
 import random
 import cv2
+import open3d as o3d
+from tqdm import trange
 random.seed(2022)
 
 images_df = pd.read_pickle("data/images.pkl")
@@ -51,7 +53,7 @@ def pnpsolver(query,model,cameraMatrix=0,distortion=0):
     return Ransac(points3D, points2D, cameraMatrix, distCoeffs)
 
 def Ransac(points3D, points2D, cameraMatrix, distCoeffs):
-    N = 1000
+    N = 20
     threshold = 5
     k = 6
 
@@ -94,13 +96,13 @@ def solveDLT(points3D, points2D, cameraMatrix, distCoeffs):
         [u, v] = points2D[i]
         A.append([X, Y, Z, 1, 0, 0, 0, 0, -u*X, -u*Y, -u*Z, -u])
         A.append([0, 0, 0, 0, X, Y, Z, 1, -v*X, -v*Y, -v*Z, -v])
-    U, S, VH = np.linalg.svd(A)
+    U, S, VH = svd(A)
     F1 = np.array([[VH[-1, 0], VH[-1, 1], VH[-1, 2]],
                    [VH[-1, 4], VH[-1, 5], VH[-1, 6]],
                    [VH[-1, 8],VH[-1, 9], VH[-1, 10]]])
     F2 = np.array([[VH[-1, 3]], [VH[-1, 7]], [VH[-1, 11]]])
-    R_ = np.linalg.inv(cameraMatrix).dot(F1)
-    t = np.linalg.inv(cameraMatrix).dot(F2)
+    R_ = inv(cameraMatrix).dot(F1)
+    t = inv(cameraMatrix).dot(F2)
     return R_, t
 
 def solveP3P(points3D, points2D, cameraMatrix, distCoeffs):
@@ -110,7 +112,7 @@ def solveP3P(points3D, points2D, cameraMatrix, distCoeffs):
 
     u = np.concatenate((points2D.T, np.ones((1, points2D.shape[0]))))
     
-    v = np.linalg.inv(cameraMatrix).dot(u)
+    v = inv(cameraMatrix).dot(u)
     v1, v2, v3 = v.T[0], v.T[1], v.T[2]
     V = [v1, v2, v3]
 
@@ -157,8 +159,8 @@ def solveP3P(points3D, points2D, cameraMatrix, distCoeffs):
                 
                 lambda_v = lambda_v_list.reshape((3, 3)).T
                 xt = xt_list.reshape((3, 3)).T
-                R = lambda_v.dot(np.linalg.inv(xt))
-                if (np.linalg.det(R) > 0):
+                R = lambda_v.dot(inv(xt))
+                if (det(R) > 0):
                     R_list.append(R)
                     T_list.append(t)
     
@@ -201,11 +203,11 @@ kp_model = np.array(desc_df["XYZ"].to_list())
 desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
 
 rimg_list = []
+R_list, T_list = [], []
 R_diff_list, T_diff_list = [], []
 
-for idx in range(1, point_desc_df['IMAGE_ID'].max()):
+for idx in trange(1, point_desc_df['IMAGE_ID'].max()):
     # Load query image
-    # idx = 200
     fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
     rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
     rimg_list.append(rimg)
@@ -217,15 +219,19 @@ for idx in range(1, point_desc_df['IMAGE_ID'].max()):
 
     # Find correspondance and solve pnp
     rvec, tvec, inliers = pnpsolver((kp_query, desc_query),(kp_model, desc_model))
-    rotq = R.from_rotvec(rvec.reshape(1, 3)).as_quat()
+    r = R.from_rotvec(rvec.reshape(1, 3))
+    rotq = r.as_quat()
     tvec = tvec.reshape(1, 3)
+    
+    R_list.append(r.as_matrix()[0])
+    T_list.append(tvec)
 
     # Get camera pose groudtruth 
     ground_truth = images_df.loc[images_df["IMAGE_ID"]==idx]
     rotq_gt = ground_truth[["QX","QY","QZ","QW"]].values
     tvec_gt = ground_truth[["TX","TY","TZ"]].values
-    print(rotq[0].reshape(-1,4))
-    temp = np.abs(rotq_gt[0].dot(rotq))
+    
+    temp = np.abs(rotq_gt.dot(rotq.T))
     if temp < 1:
         R_diff = 2 * np.arccos(temp)
     else:
@@ -238,3 +244,50 @@ for idx in range(1, point_desc_df['IMAGE_ID'].max()):
 
 print("Median of relative rotation angle differences:", np.median(R_diff_list))
 print("Median of translation differences:", np.median(T_diff_list))
+
+R_list, T_list = np.array(R_list), np.array(T_list)
+M_inv = []
+
+for r, t in zip(R_list, T_list):
+    t = np.array(t).T
+    rt = np.concatenate((r, t), axis=1)
+    M = np.concatenate((rt, [[0, 0, 0, 1]]), axis = 0)
+    M_inv.append(inv(M))
+
+apex, base = [], []
+for m in M_inv:
+    apex.append(m.dot([0, 0, 0, 1]).reshape((1,4)))
+    base.append(m.dot([0.2, 0.2, 1, 1]).reshape((1,4)))
+    base.append(m.dot([0.2, -0.2, 1, 1]).reshape((1,4)))
+    base.append(m.dot([-0.2, 0.2, 1, 1]).reshape((1,4)))
+    base.append(m.dot([-0.2, -0.2, 1, 1]).reshape((1,4)))
+
+lines, lines_color = [], []
+for i in range(len(apex)-2):
+    lines.append([i, i+1])
+    lines_color.append([0, 1, 0])
+apex, lines, lines_color = np.array(apex).reshape(-1, 4), np.array(lines).reshape(-1, 2), np.array(lines_color).reshape(-1, 3)
+
+line_set = o3d.geometry.LineSet()
+line_set.points = o3d.utility.Vector3dVector(apex[:, :-1])
+line_set.lines = o3d.utility.Vector2iVector(lines)
+line_set.colors = o3d.utility.Vector3dVector(lines_color)
+
+triangles = []
+for i in range(0, len(base), 4):
+    triangles.append([i, i+1, i+2])
+    triangles.append([i+2, i+3, i])
+
+base, triangles = np.array(base).reshape(-1, 4), np.array(triangles).reshape(-1, 3)
+mesh = o3d.geometry.TriangleMesh()
+mesh.vertices = o3d.utility.Vector3dVector(base[:,:-1])
+mesh.triangles = o3d.utility.Vector3iVector(triangles)
+mesh.paint_uniform_color([0, 0, 1])
+
+points3D_arr = np.array(points3D_df["XYZ"].to_list())
+points3D_RGB_arr = np.array(points3D_df["RGB"].to_list()) / 255
+point_cloud = o3d.geometry.PointCloud()
+point_cloud.points = o3d.utility.Vector3dVector(points3D_arr)
+point_cloud.colors = o3d.utility.Vector3dVector(points3D_RGB_arr)
+
+o3d.visualization.draw_geometries([line_set, mesh, point_cloud])
