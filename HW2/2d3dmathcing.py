@@ -6,7 +6,7 @@ from numpy.polynomial.polynomial import polycompanion
 from numpy.linalg import eig, norm
 import random
 import cv2
-
+random.seed(2022)
 
 images_df = pd.read_pickle("data/images.pkl")
 train_df = pd.read_pickle("data/train.pkl")
@@ -48,28 +48,68 @@ def pnpsolver(query,model,cameraMatrix=0,distortion=0):
     cameraMatrix = np.array([[1868.27,0,540],[0,1869.18,960],[0,0,1]])    
     distCoeffs = np.array([0.0847023,-0.192929,-0.000201144,-0.000725352])
 
-    return solveP3PRansac(points3D, points2D, cameraMatrix, distCoeffs)
+    return Ransac(points3D, points2D, cameraMatrix, distCoeffs)
 
-def solveP3PRansac(points3D, points2D, cameraMatrix, distCoeffs):
-    N = 100
+def Ransac(points3D, points2D, cameraMatrix, distCoeffs):
+    N = 1000
+    threshold = 5
+    k = 6
+
+    num_best_inliners = 0
+
     for i in range(N):
-        chosen_idx = random.sample(range(len(points3D)), 3)
+        chosen_idx = random.sample(range(len(points3D)), k)
         chosen_points3D = np.array([points3D[i] for i in chosen_idx])
         chosen_points2D = np.array([points2D[i] for i in chosen_idx])
-        rvec, tvec = solveP3P(chosen_points3D, chosen_points2D, cameraMatrix, distCoeffs)
+        # R, t = solveP3P(chosen_points3D, chosen_points2D, cameraMatrix, distCoeffs)
+        R_, t = solveDLT(chosen_points3D, chosen_points2D, cameraMatrix, distCoeffs)
 
-        # Distortion
+        M = cameraMatrix.dot(np.concatenate((R_, t), axis=1))
+        u_homo = M.dot(np.concatenate((points3D.T, np.ones((1, points3D.shape[0])))))
+        u = (u_homo / u_homo[2, :])[:2].T
+        error_vector, error = error_computation(points2D, u)
 
-    return rvec, tvec, inliers
+        idx = np.where(error_vector < threshold)[0]
+        num_inliers = len(idx)
+        
+        if num_inliers > num_best_inliners:
+            num_best_inliners = num_inliers
+            best_R = R_
+            best_T = t
+    r = R.from_matrix(best_R)
+    return r.as_rotvec(), best_T.T, num_best_inliners
+
+def error_computation(p_t, p_t_hat):
+    diff = (p_t - p_t_hat)**2
+    diff = diff.sum(axis = 1)
+    error_vector = np.sqrt(diff)
+    error = error_vector.sum()/p_t.shape[0]
+
+    return error_vector, error
+
+def solveDLT(points3D, points2D, cameraMatrix, distCoeffs):
+    A = []
+    for i in range(len(points3D)):
+        [X, Y, Z] = points3D[i]
+        [u, v] = points2D[i]
+        A.append([X, Y, Z, 1, 0, 0, 0, 0, -u*X, -u*Y, -u*Z, -u])
+        A.append([0, 0, 0, 0, X, Y, Z, 1, -v*X, -v*Y, -v*Z, -v])
+    U, S, VH = np.linalg.svd(A)
+    F1 = np.array([[VH[-1, 0], VH[-1, 1], VH[-1, 2]],
+                   [VH[-1, 4], VH[-1, 5], VH[-1, 6]],
+                   [VH[-1, 8],VH[-1, 9], VH[-1, 10]]])
+    F2 = np.array([[VH[-1, 3]], [VH[-1, 7]], [VH[-1, 11]]])
+    R_ = np.linalg.inv(cameraMatrix).dot(F1)
+    t = np.linalg.inv(cameraMatrix).dot(F2)
+    return R_, t
 
 def solveP3P(points3D, points2D, cameraMatrix, distCoeffs):
-
     x = points3D.T
     x1, x2, x3 = points3D[0], points3D[1], points3D[2]
     X = [x1, x2, x3]
 
     u = np.concatenate((points2D.T, np.ones((1, points2D.shape[0]))))
-
+    
     v = np.linalg.inv(cameraMatrix).dot(u)
     v1, v2, v3 = v.T[0], v.T[1], v.T[2]
     V = [v1, v2, v3]
@@ -87,24 +127,28 @@ def solveP3P(points3D, points2D, cameraMatrix, distCoeffs):
 
     companion = polycompanion([G0, G1, G2, G3, G4])
     roots = eig(companion)[0]
-    R_list = []
+    R_list, T_list = [], []
+
     for root in roots:
-        a = ((R_ab ** 2) / (root ** 2 - 2 * root * C_ab + 1)  ) ** 0.5
+        if (isinstance(root, complex)):
+            continue
+        a = ((R_ab ** 2) / (root ** 2 - 2 * root * C_ab + 1)) ** 0.5
         a_list = [a, -a]
-
+        m, p, q = 1 - K1, 2 * (K1 * C_ac - root * C_bc), root ** 2 - K1
+        m_prime, p_prime, q_prime = 1, 2 * (-root * C_bc), (root ** 2 * (1 - K2) + 2 * root * K2 * C_ab - K2)
+        
         for a in a_list:
-            m, p, q = 1 - K1, 2 * (K1 * C_ac - root * C_bc), root ** 2 - K1
-            m_prime, p_prime, q_prime = 1, 2 * (-root * C_bc), (root ** 2 * (1 - K2) + 2 * root * K2 * C_ab - K2)
-
+            
             y = -(m_prime * q - m * q_prime) / (p * m_prime - p_prime * m)
+
             b = root * a
             c = y * a
 
             T = trilateration(x1, x2, x3, a, b, c)
-            
+
             for t in T:
                 lambda_v_list, xt_list = np.array([]), np.array([])
-
+                
                 for i in range(len(X)):
                     lambda_ = norm(X[i] - t) / norm(V[i])
                     xt = X[i] - t
@@ -114,14 +158,11 @@ def solveP3P(points3D, points2D, cameraMatrix, distCoeffs):
                 lambda_v = lambda_v_list.reshape((3, 3)).T
                 xt = xt_list.reshape((3, 3)).T
                 R = lambda_v.dot(np.linalg.inv(xt))
-                if (np.linalg.det(R) < 0):
-                    R = -R
-                R_list.append(R)
-    R_list = np.array(R_list)
-    print(len(R_list))
-    for i in range(len(R_list)):
-        print(np.linalg.det(R_list[i]))
-    return rvec, tvec
+                if (np.linalg.det(R) > 0):
+                    R_list.append(R)
+                    T_list.append(t)
+    
+    return np.array(R_list), np.array(T_list)
 
 def trilateration(P1, P2, P3, r1, r2, r3):
 
@@ -159,23 +200,41 @@ desc_df = average_desc(train_df, points3D_df)
 kp_model = np.array(desc_df["XYZ"].to_list())
 desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
 
-# Load query image
-idx = 200
-fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
-rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
+rimg_list = []
+R_diff_list, T_diff_list = [], []
 
-# Load query keypoints and descriptors
-points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
-kp_query = np.array(points["XY"].to_list())
-desc_query = np.array(points["DESCRIPTORS"].to_list()).astype(np.float32)
+for idx in range(1, point_desc_df['IMAGE_ID'].max()):
+    # Load query image
+    # idx = 200
+    fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
+    rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
+    rimg_list.append(rimg)
 
-# Find correspondance and solve pnp
-rvec, tvec, inliers = pnpsolver((kp_query, desc_query),(kp_model, desc_model))
-rotq = R.from_rotvec(rvec.reshape(1,3)).as_quat()
-tvec = tvec.reshape(1,3)
+    # Load query keypoints and descriptors
+    points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
+    kp_query = np.array(points["XY"].to_list())
+    desc_query = np.array(points["DESCRIPTORS"].to_list()).astype(np.float32)
 
-# Get camera pose groudtruth 
-ground_truth = images_df.loc[images_df["IMAGE_ID"]==idx]
-rotq_gt = ground_truth[["QX","QY","QZ","QW"]].values
-tvec_gt = ground_truth[["TX","TY","TZ"]].values
+    # Find correspondance and solve pnp
+    rvec, tvec, inliers = pnpsolver((kp_query, desc_query),(kp_model, desc_model))
+    rotq = R.from_rotvec(rvec.reshape(1, 3)).as_quat()
+    tvec = tvec.reshape(1, 3)
 
+    # Get camera pose groudtruth 
+    ground_truth = images_df.loc[images_df["IMAGE_ID"]==idx]
+    rotq_gt = ground_truth[["QX","QY","QZ","QW"]].values
+    tvec_gt = ground_truth[["TX","TY","TZ"]].values
+    print(rotq[0].reshape(-1,4))
+    temp = np.abs(rotq_gt[0].dot(rotq))
+    if temp < 1:
+        R_diff = 2 * np.arccos(temp)
+    else:
+        R_diff = 2 * np.arccos(1)
+
+    T_diff = distance.euclidean(tvec_gt[0], tvec[0])
+
+    R_diff_list.append(R_diff)
+    T_diff_list.append(T_diff)
+
+print("Median of relative rotation angle differences:", np.median(R_diff_list))
+print("Median of translation differences:", np.median(T_diff_list))
