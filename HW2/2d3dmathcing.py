@@ -220,7 +220,6 @@ desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
 R_list, T_list = [], []
 R_diff_list, T_diff_list = [], []
 
-# for idx in trange(1, 11):
 for idx in trange(1, point_desc_df['IMAGE_ID'].max()):
     # Load query image
     # fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
