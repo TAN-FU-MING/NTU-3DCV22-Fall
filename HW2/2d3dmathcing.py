@@ -80,7 +80,9 @@ def DLTRansac(points3D, points2D, cameraMatrix, distCoeffs):
     
     if (num_best_inliners != 0):
         r = R.from_matrix(best_R)
-    return r.as_rotvec(), best_T.T, num_best_inliners
+        return r.as_rotvec(), best_T.T, num_best_inliners
+    else:
+        return best_R, best_T, num_best_inliners
 
 def error_computation(p_t, p_t_hat):
     diff = (p_t - p_t_hat)**2
