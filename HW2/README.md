@@ -1,3 +1,20 @@
-# Homework2
+## Environment
+```shell
+pip install -r requirements.txt
+```
 
-Dataset: [Download](https://drive.google.com/u/0/uc?export=download&confirm=qrVw&id=1GrCpYJFc8IZM_Uiisq6e8UxwVMFvr4AJ)
+## Download
+```shell
+# To download data
+bash download.sh
+```
+
+## Reproduce Question 1
+``` shell
+python3 2d3dmatching.py
+```
+
+## Reproduce Question 2
+``` shell
+python3 transform_cube.py
+```
