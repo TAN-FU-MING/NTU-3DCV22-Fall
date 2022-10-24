@@ -350,9 +350,8 @@ def main():
 
     K = np.array([[1868.27,0,540],[0,1869.18,960],[0,0,1]])
     img_list, R_list, T_list = Get_Image_R_T()
-    print(img_list.shape, R_list.shape, T_list.shape)
 
-    videowrt = cv.VideoWriter("AR_video.mp4", cv.VideoWriter_fourcc(*'XVID'), 24, (1080, 1920))
+    videowrt = cv.VideoWriter("AR_video.mp4", cv.VideoWriter_fourcc(*'mp4v'), 15, (1080, 1920))
 
     for img, r, t in zip(img_list, R_list, T_list):
         M = K.dot(np.concatenate((r, t.T), axis=1))
