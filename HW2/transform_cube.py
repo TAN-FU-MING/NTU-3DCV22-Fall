@@ -233,7 +233,6 @@ def Get_Image_R_T():
         # Load query image
         fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
         rimg = cv.imread("data/frames/"+fname)
-        img_list.append(rimg)
 
         # Load query keypoints and descriptors
         points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
@@ -247,10 +246,11 @@ def Get_Image_R_T():
             r = R.from_rotvec(rvec.reshape(1, 3))
             tvec = tvec.reshape(1, 3)
             
+            img_list.append(rimg)
             R_list.append(r.as_matrix()[0])
             T_list.append(tvec)
 
-    img_list, R_list, T_list = np.array(img_list), np.array(R_list).reshape(-1, 3, 3), np
+    img_list, R_list, T_list = np.array(img_list), np.array(R_list).reshape(-1, 3, 3), np.array(T_list).reshape(-1, 1, 3)
     return img_list, R_list, T_list
 
 vis = o3d.visualization.VisualizerWithKeyCallback()
@@ -350,6 +350,7 @@ def main():
 
     K = np.array([[1868.27,0,540],[0,1869.18,960],[0,0,1]])
     img_list, R_list, T_list = Get_Image_R_T()
+    print(img_list.shape, R_list.shape, T_list.shape)
 
     videowrt = cv.VideoWriter("AR_video.mp4", cv.VideoWriter_fourcc(*'MP4V'), 20, (1080, 1920))
 
