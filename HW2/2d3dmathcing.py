@@ -11,6 +11,11 @@ import open3d as o3d
 from tqdm import tqdm
 import random
 
+images_df = pd.read_pickle("data/images.pkl")
+train_df = pd.read_pickle("data/train.pkl")
+points3D_df = pd.read_pickle("data/points3D.pkl")
+point_desc_df = pd.read_pickle("data/point_desc.pkl")
+
 def average(x):
     return list(np.mean(x,axis=0))
 
@@ -222,9 +227,6 @@ def visualization(M_inv, points3D_df):
 
         camera_coor = np.append(all_points, m.dot(np.array([0, 0, 0, 1])).reshape((1,4)), axis=0)
 
-    #save camera coordinate for Q2
-    np.save("camera_coor.npy", np.array(camera_coor))
-
     lines = np.empty((0, 2), np.int32)
     lines_color = np.empty((0, 3), float)
     triangles = np.empty((0, 3), float)
@@ -271,25 +273,22 @@ def visualization(M_inv, points3D_df):
     mesh.triangles = o3d.utility.Vector3iVector(triangles)
     mesh.paint_uniform_color([0, 0, 0.5])
 
-    points3D_arr = np.array(points3D_df["XYZ"].to_list())
-    points3D_RGB_arr = np.array(points3D_df["RGB"].to_list()) / 255
+    points3D_positions = np.array(points3D_df["XYZ"].to_list())
+    points3D_colors = np.array(points3D_df["RGB"].to_list()) / 255
 
     point_cloud = o3d.geometry.PointCloud()
-    point_cloud.points = o3d.utility.Vector3dVector(points3D_arr)
-    point_cloud.colors = o3d.utility.Vector3dVector(points3D_RGB_arr)
+    point_cloud.points = o3d.utility.Vector3dVector(points3D_positions)
+    point_cloud.colors = o3d.utility.Vector3dVector(points3D_colors)
 
     o3d.visualization.draw_geometries([line_set, mesh, point_cloud])
     
 def main():
-    images_df = pd.read_pickle("data/images.pkl")
-    train_df = pd.read_pickle("data/train.pkl")
-    points3D_df = pd.read_pickle("data/points3D.pkl")
-    point_desc_df = pd.read_pickle("data/point_desc.pkl")
-
     # Process model descriptors
     desc_df = average_desc(train_df, points3D_df)
     kp_model = np.array(desc_df["XYZ"].to_list())
     desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
+
+    global images_df
 
     # Preprocess images_df
     images_df = images_df[images_df.NAME.str.startswith("train")]
@@ -302,7 +301,7 @@ def main():
     images_df.sort_values(by = ["NEW_ID"], inplace = True)
 
     R_list, T_list = [], []
-    R_diff_list, T_diff_list = [], []
+    R_diff_list, T_diff_list = np.empty((0, 1),float), np.empty((0, 1),float)
 
     for idx in tqdm(images_df.IMAGE_ID):
         # Load query image
@@ -335,13 +334,12 @@ def main():
                 R_diff = 2 * np.arccos(temp)
             else:
                 R_diff = 2 * np.arccos(1)
-
             T_diff = distance.euclidean(tvec_gt[0], tvec[0])
             
-            R_diff_list.append(R_diff)
-            T_diff_list.append(T_diff)
+            R_diff_list = np.append(R_diff_list, R_diff)
+            T_diff_list = np.append(R_diff_list, T_diff)
         
-    print("Median of relative rotation angle differences:", np.median(R_diff_list)[0,0])
+    print("Median of relative rotation angle differences:", np.median(R_diff_list))
     print("Median of translation differences:", np.median(T_diff_list))
 
     R_list, T_list = np.array(R_list).reshape(-1, 3, 3), np.array(T_list).reshape(-1, 1, 3)
@@ -353,10 +351,6 @@ def main():
         M_inv.append(inv(M))
 
     visualization(M_inv, points3D_df)
-
-    # For Question 2
-    np.save("R.npy", np.array(R_list))
-    np.save("t.npy", np.array(T_list))
 
 if __name__ == '__main__':
     main()
