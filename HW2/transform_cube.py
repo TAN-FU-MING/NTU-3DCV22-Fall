@@ -352,13 +352,14 @@ def main():
     img_list, R_list, T_list = Get_Image_R_T()
     print(img_list.shape, R_list.shape, T_list.shape)
 
-    videowrt = cv.VideoWriter("AR_video.mp4", cv.VideoWriter_fourcc(*'MP4V'), 20, (1080, 1920))
+    videowrt = cv.VideoWriter("AR_video.mp4", cv.VideoWriter_fourcc(*'XVID'), 24, (1080, 1920))
 
     for img, r, t in zip(img_list, R_list, T_list):
         M = K.dot(np.concatenate((r, t.T), axis=1))
 
         for point, color in zip(all_points, point_colors):
-            point2D = M.dot(np.append(point, 1))[:-1] / point2D[-1]
+            point2D = M.dot(np.append(point, 1))
+            point2D = point2D[:-1] / point2D[-1]
             point2D = np.int_(point2D)
             if point2D[0] >= 0 and point2D[0] < 1080 and point2D[1] >= 0 and point2D[1] < 1920:
                 img = cv.circle(img, point2D, 5, color, thickness = -1)
