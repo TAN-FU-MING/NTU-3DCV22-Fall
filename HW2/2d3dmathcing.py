@@ -1,18 +1,15 @@
 from scipy.spatial import distance
 from scipy.spatial.transform import Rotation as R
-import pandas as pd
 import numpy as np
 from numpy.polynomial.polynomial import polycompanion
 from numpy.linalg import eig, norm, svd, inv
-import random
+import pandas as pd
+
 import cv2
 import open3d as o3d
-from tqdm import trange
 
-images_df = pd.read_pickle("data/images.pkl")
-train_df = pd.read_pickle("data/train.pkl")
-points3D_df = pd.read_pickle("data/points3D.pkl")
-point_desc_df = pd.read_pickle("data/point_desc.pkl")
+from tqdm import tqdm
+import random
 
 def average(x):
     return list(np.mean(x,axis=0))
@@ -55,7 +52,7 @@ def DLTRansac(points3D, points2D, cameraMatrix, distCoeffs):
     N = 20
     threshold = 15
     k = 6
-    num_best_inliners, best_R, Best_T = 0, None, None
+    num_best_inliners, best_R, best_T = 0, None, None
 
     for i in range(N):
         chosen_idx = random.sample(range(len(points3D)), k)
@@ -214,121 +211,152 @@ def trilateration(P1, P2, P3, r1, r2, r3):
 
     return K1, K2
 
-# Process model descriptors
-desc_df = average_desc(train_df, points3D_df)
-kp_model = np.array(desc_df["XYZ"].to_list())
-desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
+def visualization(M_inv, points3D_df):
+    all_points, camera_coor = np.empty((0, 4), float), np.empty((0, 4), float)
+    for m in M_inv:
+        all_points = np.append(all_points, m.dot(np.array([0, 0, 0, 1])).reshape((1,4)), axis=0)
+        all_points = np.append(all_points, m.dot(np.array([0.2, 0.2, 1, 1])).reshape((1,4)), axis=0)
+        all_points = np.append(all_points, m.dot(np.array([-0.2, 0.2, 1, 1])).reshape((1,4)), axis=0)
+        all_points = np.append(all_points, m.dot(np.array([-0.2, -0.2, 1, 1])).reshape((1,4)), axis=0)
+        all_points = np.append(all_points, m.dot(np.array([0.2, -0.2, 1, 1])).reshape((1,4)), axis=0)
 
-R_list, T_list = [], []
-R_diff_list, T_diff_list = [], []
+        camera_coor = np.append(all_points, m.dot(np.array([0, 0, 0, 1])).reshape((1,4)), axis=0)
 
-for idx in trange(1, point_desc_df['IMAGE_ID'].max()):
-    # Load query image
-    # fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
-    # rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
+    #save camera coordinate for Q2
+    np.save("camera_coor.npy", np.array(camera_coor))
 
-    # Load query keypoints and descriptors
-    points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
-    kp_query = np.array(points["XY"].to_list())
-    desc_query = np.array(points["DESCRIPTORS"].to_list()).astype(np.float32)
+    lines = np.empty((0, 2), np.int32)
+    lines_color = np.empty((0, 3), float)
+    triangles = np.empty((0, 3), float)
 
-    # Find correspondance and solve pnp
-    rvec, tvec, inliers = pnpsolver((kp_query, desc_query),(kp_model, desc_model))
+    for i in range(0, all_points.shape[0], 5):
+        if i != (all_points.shape[0] - 5):
+            lines = np.append(lines, np.array([[i, i + 5]]), axis=0)
+            lines_color = np.append(lines_color, np.array([[0, 1, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i + 1, i + 2]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i + 2, i + 3]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i + 3, i + 4]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i + 4, i + 1]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i, i + 1]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i, i + 2]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i, i + 3]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        lines = np.append(lines, np.array([[i, i + 4]]), axis=0)
+        lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+        triangles = np.append(triangles, np.array([[i + 3, i + 2, i + 1]]), axis=0)
+        triangles = np.append(triangles, np.array([[i + 1, i + 4, i + 3]]), axis=0)
+
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(all_points[:, :-1])
+    line_set.lines = o3d.utility.Vector2iVector(lines)
+    line_set.colors = o3d.utility.Vector3dVector(lines_color)
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(all_points[:, :-1])
+    mesh.triangles = o3d.utility.Vector3iVector(triangles)
+    mesh.paint_uniform_color([0, 0, 0.5])
+
+    points3D_arr = np.array(points3D_df["XYZ"].to_list())
+    points3D_RGB_arr = np.array(points3D_df["RGB"].to_list()) / 255
+
+    point_cloud = o3d.geometry.PointCloud()
+    point_cloud.points = o3d.utility.Vector3dVector(points3D_arr)
+    point_cloud.colors = o3d.utility.Vector3dVector(points3D_RGB_arr)
+
+    o3d.visualization.draw_geometries([line_set, mesh, point_cloud])
     
-    if (inliers != 0):
-        r = R.from_rotvec(rvec.reshape(1, 3))
-        rotq = r.as_quat()
-        tvec = tvec.reshape(1, 3)
+def main():
+    images_df = pd.read_pickle("data/images.pkl")
+    train_df = pd.read_pickle("data/train.pkl")
+    points3D_df = pd.read_pickle("data/points3D.pkl")
+    point_desc_df = pd.read_pickle("data/point_desc.pkl")
+
+    # Process model descriptors
+    desc_df = average_desc(train_df, points3D_df)
+    kp_model = np.array(desc_df["XYZ"].to_list())
+    desc_model = np.array(desc_df["DESCRIPTORS"].to_list()).astype(np.float32)
+
+    # Preprocess images_df
+    images_df = images_df[images_df.NAME.str.startswith("train")]
+    new_id_list = []
+    for name in images_df.NAME:
+        new_name = name[9:]
+        new_name = new_name[:-4]
+        new_id_list.append(int(new_name))
+    images_df['NEW_ID'] = new_id_list
+    images_df.sort_values(by = ["NEW_ID"], inplace = True)
+
+    R_list, T_list = [], []
+    R_diff_list, T_diff_list = [], []
+
+    for idx in tqdm(images_df.IMAGE_ID):
+        # Load query image
+        # fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
+        # rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
+
+        # Load query keypoints and descriptors
+        points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
+        kp_query = np.array(points["XY"].to_list())
+        desc_query = np.array(points["DESCRIPTORS"].to_list()).astype(np.float32)
+
+        # Find correspondance and solve pnp
+        rvec, tvec, inliers = pnpsolver((kp_query, desc_query),(kp_model, desc_model))
         
-        R_list.append(r.as_matrix()[0])
-        T_list.append(tvec)
+        if (inliers != 0):
+            r = R.from_rotvec(rvec.reshape(1, 3))
+            rotq = r.as_quat()
+            tvec = tvec.reshape(1, 3)
+            
+            R_list.append(r.as_matrix()[0])
+            T_list.append(tvec)
 
-        # Get camera pose groudtruth 
-        ground_truth = images_df.loc[images_df["IMAGE_ID"]==idx]
-        rotq_gt = ground_truth[["QX","QY","QZ","QW"]].values
-        tvec_gt = ground_truth[["TX","TY","TZ"]].values
+            # Get camera pose groudtruth 
+            ground_truth = images_df.loc[images_df["IMAGE_ID"]==idx]
+            rotq_gt = ground_truth[["QX","QY","QZ","QW"]].values
+            tvec_gt = ground_truth[["TX","TY","TZ"]].values
+            
+            temp = np.abs(rotq_gt.dot(rotq.T))
+            if temp < 1:
+                R_diff = 2 * np.arccos(temp)
+            else:
+                R_diff = 2 * np.arccos(1)
+
+            T_diff = distance.euclidean(tvec_gt[0], tvec[0])
+            
+            R_diff_list.append(R_diff)
+            T_diff_list.append(T_diff)
         
-        temp = np.abs(rotq_gt.dot(rotq.T))
-        if temp < 1:
-            R_diff = 2 * np.arccos(temp)
-        else:
-            R_diff = 2 * np.arccos(1)
+    print("Median of relative rotation angle differences:", np.median(R_diff_list).reshape(-1))
+    print("Median of translation differences:", np.median(T_diff_list))
 
-        T_diff = distance.euclidean(tvec_gt[0], tvec[0])
-        
-        R_diff_list.append(R_diff)
-        T_diff_list.append(T_diff)
-    
-print("Median of relative rotation angle differences:", np.median(R_diff_list))
-print("Median of translation differences:", np.median(T_diff_list))
+    R_list, T_list = np.array(R_list).reshape(-1, 3, 3), np.array(T_list).reshape(-1, 1, 3)
 
-R_list, T_list = np.array(R_list).reshape(-1, 3, 3), np.array(T_list).reshape(-1, 1, 3)
-M_inv = []
+    M_inv = []
+    for r, t in zip(R_list, T_list):
+        rt = np.concatenate((r, t.T), axis=1)
+        M = np.concatenate((rt, [[0, 0, 0, 1]]), axis = 0)
+        M_inv.append(inv(M))
 
-for r, t in zip(R_list, T_list):
-    rt = np.concatenate((r, t.T), axis=1)
-    M = np.concatenate((rt, [[0, 0, 0, 1]]), axis = 0)
-    M_inv.append(inv(M))
+    visualization(M_inv, points3D_df)
 
-all_points = np.empty((0, 4), float)
-for m in M_inv:
-    all_points = np.append(all_points, m.dot(np.array([0, 0, 0, 1])).reshape((1,4)), axis=0)
-    all_points = np.append(all_points, m.dot(np.array([0.2, 0.2, 1, 1])).reshape((1,4)), axis=0)
-    all_points = np.append(all_points, m.dot(np.array([-0.2, 0.2, 1, 1])).reshape((1,4)), axis=0)
-    all_points = np.append(all_points, m.dot(np.array([-0.2, -0.2, 1, 1])).reshape((1,4)), axis=0)
-    all_points = np.append(all_points, m.dot(np.array([0.2, -0.2, 1, 1])).reshape((1,4)), axis=0)
+    # For Question 2
+    np.save("R.npy", np.array(R_list))
+    np.save("t.npy", np.array(T_list))
 
-lines = np.empty((0, 2), np.int32)
-lines_color = np.empty((0, 3), float)
-triangles = np.empty((0, 3), float)
-
-for i in range(0, all_points.shape[0], 5):
-    if i != (all_points.shape[0] - 5):
-        lines = np.append(lines, np.array([[i, i + 5]]), axis=0)
-        lines_color = np.append(lines_color, np.array([[0, 1, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i + 1, i + 2]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i + 2, i + 3]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i + 3, i + 4]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i + 4, i + 1]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i, i + 1]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i, i + 2]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i, i + 3]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    lines = np.append(lines, np.array([[i, i + 4]]), axis=0)
-    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
-
-    triangles = np.append(triangles, np.array([[i + 3, i + 2, i + 1]]), axis=0)
-    triangles = np.append(triangles, np.array([[i + 1, i + 4, i + 3]]), axis=0)
-
-line_set = o3d.geometry.LineSet()
-line_set.points = o3d.utility.Vector3dVector(all_points[:, :-1])
-line_set.lines = o3d.utility.Vector2iVector(lines)
-line_set.colors = o3d.utility.Vector3dVector(lines_color)
-
-mesh = o3d.geometry.TriangleMesh()
-mesh.vertices = o3d.utility.Vector3dVector(all_points[:, :-1])
-mesh.triangles = o3d.utility.Vector3iVector(triangles)
-mesh.paint_uniform_color([0, 0, 0.5])
-
-points3D_arr = np.array(points3D_df["XYZ"].to_list())
-points3D_RGB_arr = np.array(points3D_df["RGB"].to_list()) / 255
-
-point_cloud = o3d.geometry.PointCloud()
-point_cloud.points = o3d.utility.Vector3dVector(points3D_arr)
-point_cloud.colors = o3d.utility.Vector3dVector(points3D_RGB_arr)
-
-o3d.visualization.draw_geometries([line_set, mesh, point_cloud])
+if __name__ == '__main__':
+    main()
