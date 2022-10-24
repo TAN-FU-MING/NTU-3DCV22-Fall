@@ -1,6 +1,7 @@
-numpy
-scipy
-pandas
-opencv-python
-open3d
-tqdm
+numpy==1.23.4
+scipy==1.9.3
+pandas==1.5.1
+opencv-python==4.6.0.66
+open3d==0.15.2
+tqdm==4.46.1
+
