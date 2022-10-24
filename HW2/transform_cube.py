@@ -180,6 +180,9 @@ def error_computation(p_t, p_t_hat):
     return error_vector, error
 
 def solveDLT(points3D, points2D, cameraMatrix, distCoeffs):
+    # UndistortImagePoints
+    points2D = cv.undistortImagePoints(points2D, cameraMatrix, distCoeffs).reshape(points2D.shape[0],2)
+
     A = []
     for i in range(len(points3D)):
         [X, Y, Z] = points3D[i]

@@ -5,7 +5,7 @@ from numpy.polynomial.polynomial import polycompanion
 from numpy.linalg import eig, norm, svd, inv
 import pandas as pd
 
-import cv2
+import cv2 as cv
 import open3d as o3d
 
 from tqdm import tqdm
@@ -31,7 +31,7 @@ def pnpsolver(query, model, cameraMatrix=0, distortion=0):
     kp_query, desc_query = query
     kp_model, desc_model = model
 
-    bf = cv2.BFMatcher()
+    bf = cv.BFMatcher()
     matches = bf.knnMatch(desc_query,desc_model,k=2)
 
     gmatches = []
@@ -95,6 +95,9 @@ def error_computation(p_t, p_t_hat):
     return error_vector, error
 
 def solveDLT(points3D, points2D, cameraMatrix, distCoeffs):
+    # UndistortImagePoints
+    points2D = cv.undistortImagePoints(points2D, cameraMatrix, distCoeffs).reshape(points2D.shape[0],2)
+
     A = []
     for i in range(len(points3D)):
         [X, Y, Z] = points3D[i]
@@ -306,7 +309,7 @@ def main():
     for idx in tqdm(images_df.IMAGE_ID):
         # Load query image
         # fname = ((images_df.loc[images_df["IMAGE_ID"] == idx])["NAME"].values)[0]
-        # rimg = cv2.imread("data/frames/"+fname,cv2.IMREAD_GRAYSCALE)
+        # rimg = cv.imread("data/frames/"+fname,cv.IMREAD_GRAYSCALE)
 
         # Load query keypoints and descriptors
         points = point_desc_df.loc[point_desc_df["IMAGE_ID"]==idx]
