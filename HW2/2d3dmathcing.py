@@ -341,7 +341,7 @@ def main():
             R_diff_list.append(R_diff)
             T_diff_list.append(T_diff)
         
-    print("Median of relative rotation angle differences:", np.median(R_diff_list).reshape(-1))
+    print("Median of relative rotation angle differences:", np.median(R_diff_list)[0,0])
     print("Median of translation differences:", np.median(T_diff_list))
 
     R_list, T_list = np.array(R_list).reshape(-1, 3, 3), np.array(T_list).reshape(-1, 1, 3)
