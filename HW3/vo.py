@@ -1,6 +1,6 @@
 import open3d as o3d
 import numpy as np
-from numpy.linalg import norm
+from numpy.linalg import norm, inv
 import cv2 as cv
 import sys, os, argparse, glob
 import multiprocessing as mp
@@ -22,13 +22,69 @@ class SimpleVO:
         p.start()
         
         keep_running = True
+
+        w = 640
+        h = 360
+
+        all_points = np.empty((0, 4), float)
+        lines = np.empty((0, 2), np.int32)
+        lines_color = np.empty((0, 3), float)
+        triangles = np.empty((0, 3), float)
+
+        origin = np.array([0, 0, 0, 1])
+        corner_1 = np.append(inv(self.K).dot(np.array([0, 0, 1])), np.array([1]), axis=0)
+        corner_2 = np.append(inv(self.K).dot(np.array([0, h-1, 1])), np.array([1]), axis=0)
+        corner_3 = np.append(inv(self.K).dot(np.array([w-1, h-1, 1])), np.array([1]), axis=0)
+        corner_4 = np.append(inv(self.K).dot(np.array([w-1, 0, 1])), np.array([1]), axis=0)
+        i = 0
+        
         while keep_running:
             try:
                 R, t = queue.get(block=False)
                 if R is not None:
                     #TODO:
                     # insert new camera pose here using vis.add_geometry()
-                    pass
+                    Rt = np.concatenate((R, t), axis=1)
+                    M = np.concatenate((Rt, [[0, 0, 0, 1]]), axis = 0)
+                    
+                    all_points = np.append(all_points, inv(M).dot(origin).reshape((1,4)), axis=0)
+                    all_points = np.append(all_points, inv(M).dot(corner_1).reshape((1,4)), axis=0)
+                    all_points = np.append(all_points, inv(M).dot(corner_2).reshape((1,4)), axis=0)
+                    all_points = np.append(all_points, inv(M).dot(corner_3).reshape((1,4)), axis=0)
+                    all_points = np.append(all_points, inv(M).dot(corner_4).reshape((1,4)), axis=0)
+                    
+                    lines = np.append(lines, np.array([[i, i + 1]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i, i + 2]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i, i + 3]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i, i + 4]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 0]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i + 1, i + 2]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 1]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i + 2, i + 3]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 1]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i + 3, i + 4]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 1]]), axis=0)
+
+                    lines = np.append(lines, np.array([[i + 4, i + 1]]), axis=0)
+                    lines_color = np.append(lines_color, np.array([[0, 0, 1]]), axis=0)
+
+                    line_set = o3d.geometry.LineSet()
+                    line_set.points = o3d.utility.Vector3dVector(all_points[:, :-1])
+                    line_set.lines = o3d.utility.Vector2iVector(lines)
+                    line_set.colors = o3d.utility.Vector3dVector(lines_color)
+
+                    vis.add_geometry(line_set)
+                    i = i + 5
+
             except: pass
             
             keep_running = keep_running and vis.poll_events()
@@ -43,7 +99,6 @@ class SimpleVO:
         img1 = cv.imread(self.frame_paths[0])
         img1 = cv.undistort(img1, self.K, self.dist)
         img1_g = cv.cvtColor(img1, cv.COLOR_BGR2GRAY)
-        cv.imshow('frame', img1)
 
         for frame_path in self.frame_paths[1:]:
             img2 = cv.imread(frame_path)
@@ -57,40 +112,56 @@ class SimpleVO:
 
             points1 = np.array([kp1[m.queryIdx].pt for m in matches])
             points2 = np.array([kp2[m.trainIdx].pt for m in matches])
-
+            
             E, mask = cv.findEssentialMat(points1, points2, self.K)
             val, R_k, t_k, mask, triangulatedPoints = cv.recoverPose(E, points1, points2, self.K, distanceThresh = 50, mask = mask)
             triangulatedPoints = triangulatedPoints[:3] / triangulatedPoints[3]
 
             R = R.dot(R_k)
-            t = t + R_k.dot(t_k)
+            t = t + R.dot(t_k)
+            
             if frame_path != self.frame_paths[1]:
-                intersection, pre_idx, cur_idx = np.intersect1d(previous_points2, points1, assume_unique=True, return_indices=True)
-                same = 0
-                for i in range(len(pre_idx)):
-                    if pre_idx[i] >= 0 and pre_idx[i] < len(previous_points2) and cur_idx[i] >= 0 and cur_idx[i] < len(points1):
-                        if same == 0:
-                            X_kminus1 = previous_triangulatedPoints[:, pre_idx[i]]
-                            X_k = triangulatedPoints[:, cur_idx[i]]
-                            same = same + 1
-                        if same == 1:
-                            X_prime_kminus1 = previous_triangulatedPoints[:, pre_idx[i]]
-                            X_prime = triangulatedPoints[:, cur_idx[i]]
-                            same = same + 1
-                            break
-                if same == 2:
-                    t = t * previous_t_norm * norm(X_k - X_prime) / norm(X_kminus1 - X_prime_kminus1)
+                close_num = 0
+                for idx1, i in enumerate(previous_points2):
+                    for idx2, j in enumerate(points1):
+                        if np.array_equal(i, j):
+                            if close_num == 0:
+                                X_kminus1 = previous_triangulatedPoints[:, idx1]
+                                X_k = triangulatedPoints[:, idx2]
+                                close_num = close_num + 1
+                                continue
+                            elif close_num == 1:
+                                X_prime_kminus1 = previous_triangulatedPoints[:, idx1]
+                                X_prime = triangulatedPoints[:, idx2]
+                                close_num = close_num + 1
+                                break
+                    if close_num == 2:
+                        break
+                if close_num == 2:
+                    scale = previous_t_norm * norm(X_k - X_prime) / norm(X_kminus1 - X_prime_kminus1) / norm(t)
+                    t = scale * t
+                    print(scale)
+
+                # pre_point1 = previous_R.dot(previous_triangulatedPoints[:, 0]) + previous_t.squeeze()
+                # pre_point2 = previous_R.dot(previous_triangulatedPoints[:, 1]) + previous_t.squeeze()
+                # cur_point1 = R.dot(previous_triangulatedPoints[:, 0]) + t.squeeze()
+                # cur_point2 = R.dot(previous_triangulatedPoints[:, 1]) + t.squeeze()
+                # t = t * norm(previous_t) * norm(cur_point1 - cur_point2) / norm(pre_point1 - pre_point2) / norm(t)
 
             previous_points2 = points2
             previous_triangulatedPoints = triangulatedPoints
             previous_t_norm = norm(t)
+
+            previous_R = R
+            previous_t = t
             queue.put((R, t))
 
             img2_ = img2
             for point in points2:
                 cv.circle(img2_, (int(point[0]), int(point[1])), 2, (0, 255, 0), -1)
             cv.imshow('frame', img2_)
-            img1 = img2
+            
+            img1_g = img2_g
 
             if cv.waitKey(30) == 27: break
         
