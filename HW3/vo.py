@@ -35,7 +35,7 @@ class SimpleVO:
         corner_2 = np.append(inv(self.K).dot(np.array([0, h-1, 1])), np.array([1]), axis=0)
         corner_3 = np.append(inv(self.K).dot(np.array([w-1, h-1, 1])), np.array([1]), axis=0)
         corner_4 = np.append(inv(self.K).dot(np.array([w-1, 0, 1])), np.array([1]), axis=0)
-        
+
         i = 0
         
         while keep_running:
@@ -44,7 +44,6 @@ class SimpleVO:
                 if R is not None:
                     #TODO:
                     # insert new camera pose here using vis.add_geometry()
-                    
                     all_points = np.append(all_points, np.hstack((R, t)).dot(origin).reshape((1,3)), axis=0)
                     all_points = np.append(all_points, np.hstack((R, t)).dot(corner_1).reshape((1,3)), axis=0)
                     all_points = np.append(all_points, np.hstack((R, t)).dot(corner_2).reshape((1,3)), axis=0)
@@ -81,6 +80,7 @@ class SimpleVO:
                     line_set.colors = o3d.utility.Vector3dVector(lines_color)
 
                     vis.add_geometry(line_set)
+
                     i = i + 5
 
             except: pass
@@ -111,7 +111,7 @@ class SimpleVO:
             points1 = np.array([kp1[m.queryIdx].pt for m in matches])
             points2 = np.array([kp2[m.trainIdx].pt for m in matches])
             
-            E, mask = cv.findEssentialMat(points1, points2, self.K)
+            E, mask = cv.findEssentialMat(points1, points2, self.K, threshold = 1)
             val, R, t, mask, triangulatedPoints = cv.recoverPose(E, points1, points2, self.K, distanceThresh = 50, mask = mask)
             triangulatedPoints = triangulatedPoints[:3] / triangulatedPoints[3]
 
@@ -125,22 +125,23 @@ class SimpleVO:
                 cur_point2 = R.dot(previous_triangulatedPoints[:, 1]) + t.squeeze()
                 scale = norm(previous_t) * norm(cur_point1 - cur_point2) / norm(pre_point1 - pre_point2) / norm(t)
                 t_scale = scale * t
-
+            
             else:
                 t_scale = t
 
-            previous_triangulatedPoints = triangulatedPoints
-
             queue.put((R, t_scale))
-            previous_R = R
-            previous_t = t
-            img1_g = img2_g
-
+            
             img2_ = img2
+            
             for point in points2:
                 cv.circle(img2_, (int(point[0]), int(point[1])), 2, (0, 255, 0), -1)
             cv.imshow('frame', img2_)
             
+            previous_triangulatedPoints = triangulatedPoints
+            previous_R = R
+            previous_t = t
+            img1_g = img2_g
+
             if cv.waitKey(30) == 27: break
         
 if __name__ == '__main__':
