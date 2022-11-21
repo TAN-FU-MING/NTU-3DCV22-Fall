@@ -90,19 +90,24 @@ class SimpleVO:
         p.join()
 
     def process_frames(self, queue):
+        # Define matching method, R, t.
         previous_R, previous_t = np.eye(3, dtype=np.float64), np.zeros((3, 1), dtype=np.float64)
         orb = cv.ORB_create()
         matcher = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
 
+        # Read first image.
         img1 = cv.imread(self.frame_paths[0])
         img1 = cv.undistort(img1, self.K, self.dist)
         img1_g = cv.cvtColor(img1, cv.COLOR_BGR2GRAY)
 
+        # Iterate through all the images.
         for frame_path in self.frame_paths[1:]:
+            # Step 1. Capture new frame img_k+1
             img2 = cv.imread(frame_path)
             img2 = cv.undistort(img2, self.K, self.dist)
             img2_g = cv.cvtColor(img2, cv.COLOR_BGR2GRAY)
-            #TODO: compute camera pose here
+
+            # Step 2. Extact and match features between img_k and img_k+1
             kp1, des1 = orb.detectAndCompute(img1_g,None)
             kp2, des2 = orb.detectAndCompute(img2_g,None)
             matches = matcher.match(des1, des2)
@@ -110,14 +115,19 @@ class SimpleVO:
 
             points1 = np.array([kp1[m.queryIdx].pt for m in matches])
             points2 = np.array([kp2[m.trainIdx].pt for m in matches])
-            
+
+            # Step 3. Esimate the essential matrix E_k,k+1
             E, mask = cv.findEssentialMat(points1, points2, self.K, threshold = 1)
+            
+            # Step 4. Decompose the E_k,k+1 into R_k,k+1 and t_k,k+1 to get the relative pose.
             val, R, t, mask, triangulatedPoints = cv.recoverPose(E, points1, points2, self.K, distanceThresh = 50, mask = mask)
             triangulatedPoints = triangulatedPoints[:3] / triangulatedPoints[3]
 
+            # Step 5. Calculate the pose of camera k+1 relative to the first camera.
             R = R.dot(previous_R)
             t = previous_t + R.dot(t)
             
+            # Step 6. Calculate the consistent scale of t_k,k+1 by 2 correspondences at the adjacent images.
             if frame_path != self.frame_paths[1]:
                 pre_point1 = previous_R.dot(previous_triangulatedPoints[:, 0]) + previous_t.squeeze()
                 pre_point2 = previous_R.dot(previous_triangulatedPoints[:, 1]) + previous_t.squeeze()
@@ -125,23 +135,23 @@ class SimpleVO:
                 cur_point2 = R.dot(previous_triangulatedPoints[:, 1]) + t.squeeze()
                 scale = norm(previous_t) * norm(cur_point1 - cur_point2) / norm(pre_point1 - pre_point2) / norm(t)
                 t_scale = scale * t
-            
+            # Set t_0,1 as default scale of t.
             else:
                 t_scale = t
 
+            # Finally return R, t for visualization, update image1 and pass R, t, triangulatedPoints to next iteration.
             queue.put((R, t_scale))
-            
-            img2_ = img2
-            
-            for point in points2:
-                cv.circle(img2_, (int(point[0]), int(point[1])), 2, (0, 255, 0), -1)
-            cv.imshow('frame', img2_)
             
             previous_triangulatedPoints = triangulatedPoints
             previous_R = R
             previous_t = t
             img1_g = img2_g
 
+            img2_ = img2
+            for point in points2:
+                cv.circle(img2_, (int(point[0]), int(point[1])), 2, (0, 255, 0), -1)
+            cv.imshow('frame', img2_)
+            
             if cv.waitKey(30) == 27: break
         
 if __name__ == '__main__':
